@@ -126,6 +126,7 @@
       <p><span>← →</span> Move | <span>↑</span> Jump | <span>↓</span> Duck</p>
       <p class="tip">Jump on enemies to defeat them!</p>
       <p class="warning">⏱️ Complete in 3 minutes or lose!</p>
+      <p class="tip">🏠 Reach the treehouse to win!</p>
     </div>
   </div>
   
@@ -137,15 +138,6 @@
     <p class="score-display">Score: <span id="finalScore">0</span></p>
     <button onclick="restartLevel()">Try Again</button>
     <button class="secondary" onclick="backToSelect()">New Game</button>
-  </div>
-  
-  <div id="victoryScreen" class="overlay hidden">
-    <h2 style="color: #ffd700; font-size: 2.5rem; margin-bottom: 15px;">🎉 YOU WIN! 🎉</h2>
-    <p style="margin-bottom: 10px;">You escaped the forest!</p>
-    <p class="score-display">Final Score: <span id="victoryScore">0</span></p>
-    <p style="margin-bottom: 5px;">Time Bonus: <span id="timeBonus" style="color: #4ade80;">+0</span></p>
-    <p style="margin-bottom: 20px; font-size: 1.2rem;">Total: <span id="totalScore" style="color: #ffd700; font-weight: bold;">0</span></p>
-    <button onclick="backToSelect()">Play Again</button>
   </div>
   
   <div id="instructions" class="hidden">
@@ -167,10 +159,15 @@ const PLAYER_WIDTH = 40;
 const PLAYER_HEIGHT = 60;
 const PLAYER_DUCK_HEIGHT = 35;
 const GROUND_Y = 420;
-const LEVEL_LENGTH = 8000; // Longer level (~30 sec more)
-const TIME_LIMIT = 180; // 3 minutes in seconds
+const LEVEL_LENGTH = 8000;
+const TIME_LIMIT = 180;
 
-// Updated sprite URLs
+// Boss area constants
+const BOSS_AREA_START = LEVEL_LENGTH - 800;
+const TREEHOUSE_X = LEVEL_LENGTH - 150;
+const TREEHOUSE_Y = 80;
+
+// Sprite URLs
 const SPRITE_URLS = {
   boy: 'https://txcountrynerd.github.io/pixel-quest-assets/boy-transparent-2.png',
   girl: 'https://txcountrynerd.github.io/pixel-quest-assets/girl-transparent-2.png',
@@ -188,16 +185,19 @@ let timeRemaining = TIME_LIMIT;
 let timerInterval = null;
 let images = {};
 let bestScores = JSON.parse(localStorage.getItem('forestRunScores') || '[]');
+let inCelebration = false;
+let celebrationTimer = 0;
 
 let player = { x: 50, y: GROUND_Y - PLAYER_HEIGHT, vx: 0, vy: 0, onGround: false, facing: 1, ducking: false, invincible: 0 };
 let platforms = [];
+let movingPlatforms = [];
 let pits = [];
 let trees = [];
 let enemies = [];
 let hearts = [];
 let spiders = [];
 let projectiles = [];
-let clouds = []; // For witches on clouds
+let clouds = [];
 let camera = { x: 0 };
 let keys = {};
 let fireworks = [];
@@ -270,32 +270,84 @@ function saveScore(finalScore, timeUsed) {
 function generatePlatforms() {
   const p = [];
   let x = 200;
-  while (x < LEVEL_LENGTH - 1000) {
+  while (x < BOSS_AREA_START - 200) {
     const y = 280 + Math.random() * 100;
     const width = 60 + Math.random() * 80;
-    // Mark some platforms to have goombas
-    const hasGoomba = Math.random() > 0.7 && x > 500 && x < LEVEL_LENGTH - 1500;
+    const hasGoomba = Math.random() > 0.7 && x > 500;
     p.push({ x, y, width, height: 20, hasGoomba });
     x += 150 + Math.random() * 200;
   }
   return p;
 }
 
+// Moving platforms throughout the level
+function generateMovingPlatforms() {
+  const mp = [];
+  let x = 800;
+  while (x < BOSS_AREA_START - 300) {
+    if (Math.random() > 0.6) {
+      const baseY = 250 + Math.random() * 100;
+      mp.push({
+        x, y: baseY, baseY,
+        width: 70, height: 20,
+        moveRange: 60 + Math.random() * 40,
+        speed: 1 + Math.random() * 1.5,
+        direction: Math.random() > 0.5 ? 1 : -1,
+        type: 'vertical'
+      });
+    }
+    x += 400 + Math.random() * 300;
+  }
+  return mp;
+}
+
+// Boss area platforms - ascending to treehouse
+function generateBossAreaPlatforms() {
+  const bp = [];
+  const startX = BOSS_AREA_START + 50;
+  
+  // Ascending platforms leading to treehouse
+  // Platform 1 - entry
+  bp.push({ x: startX, y: 380, width: 80, height: 20, moving: false });
+  
+  // Platform 2 - moving
+  bp.push({ x: startX + 100, y: 320, baseY: 320, width: 70, height: 20, moving: true, moveRange: 50, speed: 1.5, direction: 1 });
+  
+  // Platform 3 - static
+  bp.push({ x: startX + 220, y: 270, width: 70, height: 20, moving: false });
+  
+  // Platform 4 - moving
+  bp.push({ x: startX + 340, y: 220, baseY: 220, width: 70, height: 20, moving: true, moveRange: 60, speed: 2, direction: -1 });
+  
+  // Platform 5 - static
+  bp.push({ x: startX + 460, y: 170, width: 70, height: 20, moving: false });
+  
+  // Platform 6 - moving, leads to treehouse
+  bp.push({ x: startX + 560, y: 130, baseY: 130, width: 80, height: 20, moving: true, moveRange: 40, speed: 1.2, direction: 1 });
+  
+  return bp;
+}
+
 function generatePits() {
   const p = [];
   let x = 400;
-  while (x < LEVEL_LENGTH - 1500) {
-    const width = 80 + Math.random() * 60;
-    p.push({ x, width });
+  while (x < BOSS_AREA_START - 200) {
+    const inSkillSection = (x > 2400 && x < 3000) || (x > 4900 && x < 5600);
+    if (!inSkillSection) {
+      const width = 80 + Math.random() * 60;
+      p.push({ x, width });
+    }
     x += 400 + Math.random() * 300;
   }
+  
+  // Boss area pit - spans most of the boss area
+  p.push({ x: BOSS_AREA_START, width: 650, isBossPit: true });
+  
   return p;
 }
 
-// Skill jump sections - 3 sequential pits with small landings
 function generateSkillSections() {
   const sections = [];
-  // First skill section around 1/3 of level
   sections.push({ startX: 2500, pits: [
     { x: 2500, width: 100 },
     { x: 2650, width: 100 },
@@ -305,7 +357,6 @@ function generateSkillSections() {
     { x: 2750, y: 360, width: 50, height: 20 }
   ]});
   
-  // Second skill section around 2/3 of level
   sections.push({ startX: 5000, pits: [
     { x: 5000, width: 120 },
     { x: 5180, width: 120 },
@@ -321,7 +372,7 @@ function generateSkillSections() {
 function generateTrees() {
   const t = [];
   let x = 100;
-  while (x < LEVEL_LENGTH - 200) {
+  while (x < BOSS_AREA_START - 100) {
     t.push({
       x, height: 150 + Math.random() * 100,
       trunkWidth: 20 + Math.random() * 15,
@@ -337,18 +388,13 @@ function generateEnemies() {
   const e = [];
   let x = 300;
   let id = 0;
-  while (x < LEVEL_LENGTH - 1500) {
-    // Ground enemies only (not on skill sections)
+  while (x < BOSS_AREA_START - 200) {
     const inSkillSection = (x > 2400 && x < 3000) || (x > 4900 && x < 5600);
     if (!inSkillSection) {
-      const type = Math.random() > 0.75 ? 'witch' : 'goomba';
-      if (type === 'goomba') {
-        e.push({
-          id: id++, x, y: GROUND_Y - 50, startX: x,
-          type: 'goomba', direction: 1, alive: true, attackCooldown: 0, onPlatform: false
-        });
-      }
-      // Witches now go on clouds instead
+      e.push({
+        id: id++, x, y: GROUND_Y - 50, startX: x,
+        type: 'goomba', direction: 1, alive: true, attackCooldown: 0, onPlatform: false
+      });
     }
     const spacing = x < 2000 ? 350 : x < 5000 ? 280 : 220;
     x += spacing + Math.random() * 150;
@@ -356,7 +402,6 @@ function generateEnemies() {
   return e;
 }
 
-// Platform goombas
 function generatePlatformEnemies(platforms) {
   const e = [];
   let id = 1000;
@@ -372,19 +417,16 @@ function generatePlatformEnemies(platforms) {
   return e;
 }
 
-// Witches on floating clouds
 function generateCloudsWithWitches() {
   const c = [];
   let x = 600;
   let id = 2000;
-  while (x < LEVEL_LENGTH - 1500) {
+  while (x < BOSS_AREA_START - 200) {
     if (Math.random() > 0.5) {
       c.push({
         x, y: 150 + Math.random() * 100,
         width: 80, height: 30,
-        witch: {
-          id: id++, alive: true, attackCooldown: 0, direction: 1
-        }
+        witch: { id: id++, alive: true, attackCooldown: 0, direction: 1 }
       });
     }
     x += 500 + Math.random() * 400;
@@ -395,67 +437,65 @@ function generateCloudsWithWitches() {
 function generateHearts() {
   const h = [];
   let x = 600;
-  while (x < LEVEL_LENGTH - 1000) {
+  while (x < BOSS_AREA_START - 200) {
     h.push({ x, y: 250 + Math.random() * 100, collected: false });
     x += 700 + Math.random() * 400;
   }
   return h;
 }
 
-// Spiders that reach the ground!
+// Spiders in the boss area - drop from top
 function generateSpiders() {
   const s = [];
-  const startX = LEVEL_LENGTH - 700;
+  const startX = BOSS_AREA_START + 80;
   for (let i = 0; i < 5; i++) {
-    const baseY = 50 + (i % 2) * 30; // Stagger starting heights
+    const baseY = 30 + (i % 2) * 20;
     s.push({
-      x: startX + i * 120,
+      x: startX + i * 130,
       y: baseY,
       baseY: baseY,
-      maxY: GROUND_Y - 70, // Spiders now reach near ground level!
+      maxY: 400, // Go all the way down
       direction: 1,
-      speed: 2 + Math.random() * 1.5,
-      phase: i * 0.5 // Offset timing so they're not synchronized
+      speed: 2.5 + Math.random() * 2,
+      phase: i * 0.7
     });
   }
   return s;
 }
 
 let skillSections = [];
+let bossAreaPlatforms = [];
 
 function initLevel() {
   player = { x: 50, y: GROUND_Y - PLAYER_HEIGHT, vx: 0, vy: 0, onGround: false, facing: 1, ducking: false, invincible: 0 };
   camera = { x: 0 };
+  inCelebration = false;
+  celebrationTimer = 0;
   
-  // Generate skill sections first (so we can exclude them from regular pits)
   skillSections = generateSkillSections();
-  
   platforms = generatePlatforms();
+  movingPlatforms = generateMovingPlatforms();
+  bossAreaPlatforms = generateBossAreaPlatforms();
   
-  // Add skill section platforms
   skillSections.forEach(section => {
     section.platforms.forEach(p => platforms.push(p));
   });
   
   pits = generatePits();
-  
-  // Remove regular pits that overlap with skill sections
   pits = pits.filter(pit => {
+    if (pit.isBossPit) return true;
     for (const section of skillSections) {
       if (pit.x > section.startX - 200 && pit.x < section.startX + 600) return false;
     }
     return true;
   });
   
-  // Add skill section pits
   skillSections.forEach(section => {
     section.pits.forEach(p => pits.push(p));
   });
   
   trees = generateTrees();
   enemies = generateEnemies();
-  
-  // Add platform goombas
   const platEnemies = generatePlatformEnemies(platforms);
   enemies = enemies.concat(platEnemies);
   
@@ -465,11 +505,10 @@ function initLevel() {
   projectiles = [];
   fireworks = [];
   
-  // Reset timer
   timeRemaining = TIME_LIMIT;
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = setInterval(() => {
-    if (gameState === 'playing') {
+    if (gameState === 'playing' && !inCelebration) {
       timeRemaining--;
       if (timeRemaining <= 0) {
         timeOut();
@@ -504,7 +543,6 @@ function restartLevel() {
 function backToSelect() {
   if (timerInterval) clearInterval(timerInterval);
   document.getElementById('gameOverScreen').classList.add('hidden');
-  document.getElementById('victoryScreen').classList.add('hidden');
   document.getElementById('gameCanvas').classList.add('hidden');
   document.getElementById('instructions').classList.add('hidden');
   document.getElementById('selectScreen').classList.remove('hidden');
@@ -530,9 +568,8 @@ document.addEventListener('keydown', (e) => {
 });
 document.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
-// Main game loop
 function gameLoop() {
-  if (gameState !== 'playing' && gameState !== 'victory') return;
+  if (gameState !== 'playing') return;
   
   update();
   render();
@@ -542,6 +579,23 @@ function gameLoop() {
 
 function update() {
   if (gameState !== 'playing') return;
+  
+  // Handle celebration room
+  if (inCelebration) {
+    celebrationTimer++;
+    // Spawn fireworks in celebration
+    if (Math.random() < 0.1) {
+      fireworks.push({
+        x: 100 + Math.random() * 600,
+        y: GAME_HEIGHT,
+        vy: -6 - Math.random() * 4,
+        color: ['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#FFA500'][Math.floor(Math.random() * 7)],
+        exploded: false,
+        particles: []
+      });
+    }
+    return;
+  }
   
   const currentHeight = player.ducking ? PLAYER_DUCK_HEIGHT : PLAYER_HEIGHT;
   
@@ -562,6 +616,24 @@ function update() {
   player.x += player.vx;
   player.y += player.vy;
   
+  // Update moving platforms
+  movingPlatforms.forEach(mp => {
+    mp.y += mp.direction * mp.speed;
+    if (mp.y > mp.baseY + mp.moveRange || mp.y < mp.baseY - mp.moveRange) {
+      mp.direction *= -1;
+    }
+  });
+  
+  // Update boss area platforms
+  bossAreaPlatforms.forEach(bp => {
+    if (bp.moving) {
+      bp.y += bp.direction * bp.speed;
+      if (bp.y > bp.baseY + bp.moveRange || bp.y < bp.baseY - bp.moveRange) {
+        bp.direction *= -1;
+      }
+    }
+  });
+  
   // Check if over pit
   let overPit = false;
   for (const pit of pits) {
@@ -571,7 +643,7 @@ function update() {
     }
   }
   
-  // Ground collision
+  // Ground collision (not in boss area)
   if (!overPit && player.y + currentHeight > GROUND_Y) {
     player.y = GROUND_Y - currentHeight;
     player.vy = 0;
@@ -581,20 +653,57 @@ function update() {
   // Fall into pit
   if (player.y > GAME_HEIGHT + 50) {
     health--;
-    if (health <= 0) { endGame('Fell into a pit!'); return; }
-    player.y = GROUND_Y - PLAYER_HEIGHT;
-    player.x = Math.max(50, player.x - 200);
+    if (health <= 0) { endGame('Fell into the pit!'); return; }
+    
+    // Respawn - if in boss area, respawn at boss area start
+    if (player.x >= BOSS_AREA_START) {
+      player.x = BOSS_AREA_START - 100;
+      player.y = GROUND_Y - PLAYER_HEIGHT;
+    } else {
+      player.x = Math.max(50, player.x - 200);
+      player.y = GROUND_Y - PLAYER_HEIGHT;
+    }
     player.vy = 0;
     player.invincible = 90;
   }
   
-  // Platform collision
+  // Static platform collision
   for (const plat of platforms) {
     if (player.x + PLAYER_WIDTH > plat.x && player.x < plat.x + plat.width) {
       if (player.y + currentHeight > plat.y && player.y + currentHeight < plat.y + plat.height + 15 && player.vy > 0) {
         player.y = plat.y - currentHeight;
         player.vy = 0;
         player.onGround = true;
+      }
+    }
+  }
+  
+  // Moving platform collision
+  for (const mp of movingPlatforms) {
+    if (player.x + PLAYER_WIDTH > mp.x && player.x < mp.x + mp.width) {
+      if (player.y + currentHeight > mp.y && player.y + currentHeight < mp.y + mp.height + 15 && player.vy > 0) {
+        player.y = mp.y - currentHeight;
+        player.vy = 0;
+        player.onGround = true;
+        // Move with platform
+        if (mp.type === 'vertical') {
+          player.y += mp.direction * mp.speed;
+        }
+      }
+    }
+  }
+  
+  // Boss area platform collision
+  for (const bp of bossAreaPlatforms) {
+    if (player.x + PLAYER_WIDTH > bp.x && player.x < bp.x + bp.width) {
+      if (player.y + currentHeight > bp.y && player.y + currentHeight < bp.y + bp.height + 15 && player.vy > 0) {
+        player.y = bp.y - currentHeight;
+        player.vy = 0;
+        player.onGround = true;
+        // Move with platform if moving
+        if (bp.moving) {
+          player.y += bp.direction * bp.speed;
+        }
       }
     }
   }
@@ -606,32 +715,27 @@ function update() {
   // Camera
   camera.x = Math.max(0, Math.min(LEVEL_LENGTH - GAME_WIDTH, player.x - GAME_WIDTH / 3));
   
-  // Enemy AI (ground and platform goombas)
+  // Enemy AI
   enemies.forEach(enemy => {
     if (!enemy.alive) return;
     
     if (enemy.onPlatform) {
-      // Platform goomba - patrol on platform only
       enemy.x += enemy.direction * 1.2;
       if (enemy.x < enemy.platformX || enemy.x > enemy.platformX + enemy.platformWidth - 40) {
         enemy.direction *= -1;
       }
     } else {
-      // Ground enemy
       enemy.x += enemy.direction * 1.5;
       if (Math.abs(enemy.x - enemy.startX) > 80) enemy.direction *= -1;
     }
     
-    // Collision with player
     const enemyWidth = 50, enemyHeight = 50;
-    const enemyY = enemy.onPlatform ? enemy.y : enemy.y;
-    
     if (player.x + PLAYER_WIDTH > enemy.x && player.x < enemy.x + enemyWidth) {
-      if (player.vy > 0 && player.y + currentHeight > enemyY && player.y + currentHeight < enemyY + 25) {
+      if (player.vy > 0 && player.y + currentHeight > enemy.y && player.y + currentHeight < enemy.y + 25) {
         enemy.alive = false;
         player.vy = JUMP_FORCE * 0.6;
         score += 100;
-      } else if (player.invincible <= 0 && player.y + currentHeight > enemyY && player.y < enemyY + enemyHeight) {
+      } else if (player.invincible <= 0 && player.y + currentHeight > enemy.y && player.y < enemy.y + enemyHeight) {
         health--;
         if (health <= 0) { endGame('Hit by a Goomba!'); return; }
         player.invincible = 90;
@@ -643,17 +747,10 @@ function update() {
   // Cloud witches
   clouds.forEach(cloud => {
     if (!cloud.witch.alive) return;
-    
-    // Witch throws potions
     if (cloud.witch.attackCooldown <= 0) {
       const dist = player.x - cloud.x;
       if (Math.abs(dist) < 400 && Math.abs(dist) > 50) {
-        projectiles.push({
-          x: cloud.x + 40,
-          y: cloud.y + 50,
-          vx: dist > 0 ? 3.5 : -3.5,
-          vy: 1
-        });
+        projectiles.push({ x: cloud.x + 40, y: cloud.y + 50, vx: dist > 0 ? 3.5 : -3.5, vy: 1 });
         cloud.witch.attackCooldown = 120;
       }
     }
@@ -688,33 +785,41 @@ function update() {
     }
   });
   
-  // Spiders - now reach the ground!
+  // Spiders
   spiders.forEach(spider => {
     spider.y += spider.direction * spider.speed;
-    
-    // Bounce between top and near-ground
-    if (spider.y >= spider.maxY) {
-      spider.direction = -1;
-    } else if (spider.y <= spider.baseY) {
-      spider.direction = 1;
+    if (spider.y >= spider.maxY || spider.y <= spider.baseY) {
+      spider.direction *= -1;
     }
     
-    const spiderWidth = 80, spiderHeight = 70;
-    
     if (player.invincible <= 0 &&
-        player.x + PLAYER_WIDTH > spider.x && player.x < spider.x + spiderWidth &&
-        player.y + currentHeight > spider.y && player.y < spider.y + spiderHeight) {
+        player.x + PLAYER_WIDTH > spider.x && player.x < spider.x + 80 &&
+        player.y + currentHeight > spider.y && player.y < spider.y + 70) {
       health--;
       if (health <= 0) { endGame('Caught by a spider!'); return; }
       player.invincible = 90;
-      player.vx = -10;
+      player.vx = -8;
     }
   });
   
-  // Victory
-  if (player.x > LEVEL_LENGTH - 100) {
-    victory();
+  // Check treehouse entry - victory!
+  if (player.x > TREEHOUSE_X - 30 && player.x < TREEHOUSE_X + 80 &&
+      player.y < TREEHOUSE_Y + 100 && player.y > TREEHOUSE_Y - 20) {
+    enterCelebration();
   }
+}
+
+function enterCelebration() {
+  inCelebration = true;
+  celebrationTimer = 0;
+  score += 500; // Bonus for reaching treehouse
+  
+  // Calculate final score
+  const timeUsed = TIME_LIMIT - timeRemaining;
+  const timeBonus = timeRemaining * 10;
+  const totalScore = score + timeBonus;
+  
+  saveScore(totalScore, timeUsed);
 }
 
 function endGame(reason) {
@@ -727,23 +832,13 @@ function endGame(reason) {
   document.getElementById('gameOverScreen').classList.remove('hidden');
 }
 
-function victory() {
-  if (timerInterval) clearInterval(timerInterval);
-  gameState = 'victory';
-  
-  // Calculate time bonus (more time left = more points)
-  const timeUsed = TIME_LIMIT - timeRemaining;
-  const timeBonus = timeRemaining * 10; // 10 points per second remaining
-  const totalScore = score + timeBonus + 1000; // +1000 for completing
-  
-  document.getElementById('victoryScore').textContent = score;
-  document.getElementById('timeBonus').textContent = '+' + timeBonus;
-  document.getElementById('totalScore').textContent = totalScore;
-  
-  saveScore(totalScore, timeUsed);
-}
-
 function render() {
+  // If in celebration, render the treehouse interior
+  if (inCelebration) {
+    renderCelebration();
+    return;
+  }
+  
   const currentHeight = player.ducking ? PLAYER_DUCK_HEIGHT : PLAYER_HEIGHT;
   
   // Sky gradient
@@ -754,8 +849,8 @@ function render() {
   ctx.fillStyle = skyGradient;
   ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
   
-  // Easter egg - "made by Sarah with AI" in the sky (appears in middle of level)
-  const easterEggX = 4000; // Middle-ish of the level
+  // Easter egg
+  const easterEggX = 4000;
   const eggScreenX = easterEggX - camera.x;
   if (eggScreenX > -300 && eggScreenX < GAME_WIDTH + 100) {
     ctx.save();
@@ -792,7 +887,6 @@ function render() {
   clouds.forEach(cloud => {
     const screenX = cloud.x - camera.x;
     if (screenX > -100 && screenX < GAME_WIDTH + 100) {
-      // Draw cloud
       ctx.fillStyle = '#fff';
       ctx.beginPath();
       ctx.arc(screenX + 20, cloud.y + 15, 25, 0, Math.PI * 2);
@@ -800,12 +894,57 @@ function render() {
       ctx.arc(screenX + 80, cloud.y + 15, 25, 0, Math.PI * 2);
       ctx.fill();
       
-      // Draw witch on cloud
       if (cloud.witch.alive && images.witch) {
         ctx.drawImage(images.witch, screenX + 25, cloud.y - 50, 45, 55);
       }
     }
   });
+  
+  // Treehouse at the end (goal!)
+  const treehouseScreenX = TREEHOUSE_X - camera.x;
+  if (treehouseScreenX > -150 && treehouseScreenX < GAME_WIDTH + 100) {
+    // Large tree trunk
+    ctx.fillStyle = '#5D4037';
+    ctx.fillRect(treehouseScreenX + 30, TREEHOUSE_Y + 60, 50, 400);
+    
+    // Tree canopy behind house
+    ctx.fillStyle = '#1B5E20';
+    ctx.beginPath();
+    ctx.arc(treehouseScreenX + 55, TREEHOUSE_Y - 20, 80, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Treehouse structure
+    ctx.fillStyle = '#8D6E63';
+    ctx.fillRect(treehouseScreenX - 10, TREEHOUSE_Y + 20, 120, 80);
+    
+    // Roof
+    ctx.fillStyle = '#5D4037';
+    ctx.beginPath();
+    ctx.moveTo(treehouseScreenX - 20, TREEHOUSE_Y + 20);
+    ctx.lineTo(treehouseScreenX + 50, TREEHOUSE_Y - 20);
+    ctx.lineTo(treehouseScreenX + 120, TREEHOUSE_Y + 20);
+    ctx.fill();
+    
+    // Door
+    ctx.fillStyle = '#3E2723';
+    ctx.fillRect(treehouseScreenX + 40, TREEHOUSE_Y + 45, 30, 55);
+    
+    // Window
+    ctx.fillStyle = '#FFEB3B';
+    ctx.fillRect(treehouseScreenX + 5, TREEHOUSE_Y + 45, 25, 25);
+    ctx.fillRect(treehouseScreenX + 80, TREEHOUSE_Y + 45, 25, 25);
+    
+    // Window frames
+    ctx.strokeStyle = '#5D4037';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(treehouseScreenX + 5, TREEHOUSE_Y + 45, 25, 25);
+    ctx.strokeRect(treehouseScreenX + 80, TREEHOUSE_Y + 45, 25, 25);
+    
+    // "GOAL" sign
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 14px Arial';
+    ctx.fillText('🏠 GOAL!', treehouseScreenX + 25, TREEHOUSE_Y + 10);
+  }
   
   // Ground
   const groundGradient = ctx.createLinearGradient(0, GROUND_Y, 0, GAME_HEIGHT);
@@ -828,20 +967,35 @@ function render() {
   pits.forEach(pit => {
     const screenX = pit.x - camera.x;
     if (screenX > -pit.width && screenX < GAME_WIDTH) {
-      ctx.fillStyle = '#1a1a2e';
-      ctx.fillRect(screenX, GROUND_Y, pit.width, GAME_HEIGHT - GROUND_Y);
-      ctx.fillStyle = '#808080';
-      for (let s = 0; s < pit.width; s += 15) {
-        ctx.beginPath();
-        ctx.moveTo(screenX + s, GAME_HEIGHT);
-        ctx.lineTo(screenX + s + 7, GAME_HEIGHT - 20);
-        ctx.lineTo(screenX + s + 14, GAME_HEIGHT);
-        ctx.fill();
+      // Boss pit has lava!
+      if (pit.isBossPit) {
+        ctx.fillStyle = '#1a0a0a';
+        ctx.fillRect(screenX, GROUND_Y, pit.width, GAME_HEIGHT - GROUND_Y);
+        // Lava at bottom
+        ctx.fillStyle = '#FF4500';
+        ctx.fillRect(screenX, GAME_HEIGHT - 40, pit.width, 40);
+        ctx.fillStyle = '#FF6600';
+        for (let lx = 0; lx < pit.width; lx += 30) {
+          ctx.beginPath();
+          ctx.arc(screenX + lx + 15, GAME_HEIGHT - 40 + Math.sin(Date.now() / 200 + lx) * 5, 20, Math.PI, 0);
+          ctx.fill();
+        }
+      } else {
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fillRect(screenX, GROUND_Y, pit.width, GAME_HEIGHT - GROUND_Y);
+        ctx.fillStyle = '#808080';
+        for (let s = 0; s < pit.width; s += 15) {
+          ctx.beginPath();
+          ctx.moveTo(screenX + s, GAME_HEIGHT);
+          ctx.lineTo(screenX + s + 7, GAME_HEIGHT - 20);
+          ctx.lineTo(screenX + s + 14, GAME_HEIGHT);
+          ctx.fill();
+        }
       }
     }
   });
   
-  // Platforms
+  // Static platforms
   platforms.forEach(plat => {
     const screenX = plat.x - camera.x;
     if (screenX > -plat.width && screenX < GAME_WIDTH) {
@@ -849,6 +1003,43 @@ function render() {
       ctx.fillRect(screenX, plat.y, plat.width, plat.height);
       ctx.fillStyle = '#32CD32';
       ctx.fillRect(screenX, plat.y - 5, plat.width, 8);
+    }
+  });
+  
+  // Moving platforms
+  movingPlatforms.forEach(mp => {
+    const screenX = mp.x - camera.x;
+    if (screenX > -mp.width && screenX < GAME_WIDTH) {
+      // Platform with glow effect
+      ctx.fillStyle = '#6B4226';
+      ctx.fillRect(screenX, mp.y, mp.width, mp.height);
+      ctx.fillStyle = '#90EE90';
+      ctx.fillRect(screenX, mp.y - 5, mp.width, 8);
+      // Arrow indicators
+      ctx.fillStyle = '#FFD700';
+      ctx.font = '12px Arial';
+      ctx.fillText('↕', screenX + mp.width / 2 - 5, mp.y + 15);
+    }
+  });
+  
+  // Boss area platforms
+  bossAreaPlatforms.forEach(bp => {
+    const screenX = bp.x - camera.x;
+    if (screenX > -bp.width && screenX < GAME_WIDTH) {
+      if (bp.moving) {
+        ctx.fillStyle = '#8B5A2B';
+        ctx.fillRect(screenX, bp.y, bp.width, bp.height);
+        ctx.fillStyle = '#98FB98';
+        ctx.fillRect(screenX, bp.y - 5, bp.width, 8);
+        ctx.fillStyle = '#FFD700';
+        ctx.font = '10px Arial';
+        ctx.fillText('↕', screenX + bp.width / 2 - 4, bp.y + 14);
+      } else {
+        ctx.fillStyle = '#8B4513';
+        ctx.fillRect(screenX, bp.y, bp.width, bp.height);
+        ctx.fillStyle = '#32CD32';
+        ctx.fillRect(screenX, bp.y - 5, bp.width, 8);
+      }
     }
   });
   
@@ -868,7 +1059,7 @@ function render() {
     }
   });
   
-  // Enemies (goombas)
+  // Enemies
   enemies.forEach(enemy => {
     if (!enemy.alive) return;
     const screenX = enemy.x - camera.x;
@@ -904,7 +1095,6 @@ function render() {
   spiders.forEach(spider => {
     const screenX = spider.x - camera.x;
     if (screenX > -100 && screenX < GAME_WIDTH + 100) {
-      // Web string
       ctx.strokeStyle = '#AAA';
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -951,7 +1141,264 @@ function render() {
     }
   }
   
-  // HUD - Health
+  // HUD
+  renderHUD();
+}
+
+function renderCelebration() {
+  // Treehouse interior background - warm wood tones
+  const woodGradient = ctx.createLinearGradient(0, 0, 0, GAME_HEIGHT);
+  woodGradient.addColorStop(0, '#8B5A2B');
+  woodGradient.addColorStop(0.5, '#A0522D');
+  woodGradient.addColorStop(1, '#6B4226');
+  ctx.fillStyle = woodGradient;
+  ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+  
+  // Wood plank lines on walls
+  ctx.strokeStyle = '#5D4037';
+  ctx.lineWidth = 2;
+  for (let y = 0; y < GAME_HEIGHT; y += 40) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(GAME_WIDTH, y);
+    ctx.stroke();
+  }
+  
+  // Wood grain details
+  ctx.strokeStyle = 'rgba(93, 64, 55, 0.3)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 20; i++) {
+    const x = 50 + i * 40;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.bezierCurveTo(x + 10, GAME_HEIGHT / 3, x - 10, GAME_HEIGHT * 2 / 3, x, GAME_HEIGHT);
+    ctx.stroke();
+  }
+  
+  // Floor
+  ctx.fillStyle = '#4E342E';
+  ctx.fillRect(0, GAME_HEIGHT - 80, GAME_WIDTH, 80);
+  
+  // Floor boards
+  ctx.strokeStyle = '#3E2723';
+  ctx.lineWidth = 2;
+  for (let x = 0; x < GAME_WIDTH; x += 60) {
+    ctx.beginPath();
+    ctx.moveTo(x, GAME_HEIGHT - 80);
+    ctx.lineTo(x, GAME_HEIGHT);
+    ctx.stroke();
+  }
+  
+  // Window on left
+  ctx.fillStyle = '#87CEEB';
+  ctx.fillRect(50, 100, 120, 100);
+  ctx.strokeStyle = '#5D4037';
+  ctx.lineWidth = 8;
+  ctx.strokeRect(50, 100, 120, 100);
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(110, 100);
+  ctx.lineTo(110, 200);
+  ctx.moveTo(50, 150);
+  ctx.lineTo(170, 150);
+  ctx.stroke();
+  
+  // Curtains
+  ctx.fillStyle = '#C62828';
+  ctx.fillRect(40, 85, 30, 130);
+  ctx.fillRect(150, 85, 30, 130);
+  
+  // Window on right
+  ctx.fillStyle = '#87CEEB';
+  ctx.fillRect(GAME_WIDTH - 170, 100, 120, 100);
+  ctx.strokeStyle = '#5D4037';
+  ctx.lineWidth = 8;
+  ctx.strokeRect(GAME_WIDTH - 170, 100, 120, 100);
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(GAME_WIDTH - 110, 100);
+  ctx.lineTo(GAME_WIDTH - 110, 200);
+  ctx.moveTo(GAME_WIDTH - 170, 150);
+  ctx.lineTo(GAME_WIDTH - 50, 150);
+  ctx.stroke();
+  
+  // Curtains
+  ctx.fillStyle = '#C62828';
+  ctx.fillRect(GAME_WIDTH - 180, 85, 30, 130);
+  ctx.fillRect(GAME_WIDTH - 70, 85, 30, 130);
+  
+  // Decorative banner
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath();
+  ctx.moveTo(200, 50);
+  ctx.lineTo(600, 50);
+  ctx.lineTo(620, 70);
+  ctx.lineTo(600, 90);
+  ctx.lineTo(200, 90);
+  ctx.lineTo(180, 70);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#B8860B';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  
+  // Hanging string
+  ctx.strokeStyle = '#8B4513';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(200, 50);
+  ctx.lineTo(180, 20);
+  ctx.moveTo(600, 50);
+  ctx.lineTo(620, 20);
+  ctx.stroke();
+  
+  // Bookshelf
+  ctx.fillStyle = '#5D4037';
+  ctx.fillRect(250, 250, 100, 120);
+  ctx.fillStyle = '#3E2723';
+  ctx.fillRect(255, 260, 90, 5);
+  ctx.fillRect(255, 300, 90, 5);
+  ctx.fillRect(255, 340, 90, 5);
+  
+  // Books
+  const bookColors = ['#E53935', '#1E88E5', '#43A047', '#FB8C00', '#8E24AA'];
+  for (let row = 0; row < 3; row++) {
+    for (let b = 0; b < 4; b++) {
+      ctx.fillStyle = bookColors[(row + b) % bookColors.length];
+      ctx.fillRect(260 + b * 20, 265 + row * 40, 15, 30);
+    }
+  }
+  
+  // Cozy rug
+  ctx.fillStyle = '#B71C1C';
+  ctx.beginPath();
+  ctx.ellipse(GAME_WIDTH / 2, GAME_HEIGHT - 50, 150, 40, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#880E0E';
+  ctx.beginPath();
+  ctx.ellipse(GAME_WIDTH / 2, GAME_HEIGHT - 50, 120, 30, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath();
+  ctx.ellipse(GAME_WIDTH / 2, GAME_HEIGHT - 50, 80, 20, 0, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Character standing on rug
+  const playerImg = selectedCharacter === 'boy' ? images.boy : images.girl;
+  if (playerImg) {
+    ctx.drawImage(playerImg, GAME_WIDTH / 2 - 30, GAME_HEIGHT - 140, 60, 90);
+  }
+  
+  // Lanterns
+  ctx.fillStyle = '#FFA000';
+  ctx.beginPath();
+  ctx.arc(100, 300, 20, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#FFECB3';
+  ctx.beginPath();
+  ctx.arc(100, 300, 12, 0, Math.PI * 2);
+  ctx.fill();
+  
+  ctx.fillStyle = '#FFA000';
+  ctx.beginPath();
+  ctx.arc(GAME_WIDTH - 100, 300, 20, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#FFECB3';
+  ctx.beginPath();
+  ctx.arc(GAME_WIDTH - 100, 300, 12, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Update and draw fireworks
+  fireworks = fireworks.filter(fw => {
+    if (!fw.exploded) {
+      fw.y += fw.vy;
+      ctx.fillStyle = fw.color;
+      ctx.beginPath();
+      ctx.arc(fw.x, fw.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+      if (fw.vy > -2) {
+        fw.exploded = true;
+        for (let i = 0; i < 25; i++) {
+          fw.particles.push({
+            x: fw.x, y: fw.y,
+            vx: (Math.random() - 0.5) * 10,
+            vy: (Math.random() - 0.5) * 10,
+            life: 50
+          });
+        }
+      }
+    } else {
+      fw.particles = fw.particles.filter(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.1;
+        p.life--;
+        ctx.fillStyle = fw.color;
+        ctx.globalAlpha = p.life / 50;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        return p.life > 0;
+      });
+      return fw.particles.length > 0;
+    }
+    return true;
+  });
+  
+  // Victory text
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 48px Georgia';
+  ctx.textAlign = 'center';
+  ctx.shadowColor = '#000';
+  ctx.shadowBlur = 10;
+  ctx.fillText('🎉 VICTORY! 🎉', GAME_WIDTH / 2, 75);
+  ctx.shadowBlur = 0;
+  
+  // Score display
+  const timeUsed = TIME_LIMIT - timeRemaining;
+  const timeBonus = timeRemaining * 10;
+  const totalScore = score + timeBonus;
+  
+  ctx.fillStyle = '#FFF';
+  ctx.font = 'bold 24px Arial';
+  ctx.fillText('You reached the treehouse!', GAME_WIDTH / 2, 130);
+  
+  ctx.font = '20px Arial';
+  ctx.fillStyle = '#90EE90';
+  ctx.fillText('Base Score: ' + score, GAME_WIDTH / 2, 170);
+  ctx.fillText('Time Bonus: +' + timeBonus, GAME_WIDTH / 2, 195);
+  
+  ctx.font = 'bold 28px Arial';
+  ctx.fillStyle = '#FFD700';
+  ctx.fillText('TOTAL: ' + totalScore, GAME_WIDTH / 2, 235);
+  
+  ctx.textAlign = 'left';
+  
+  // Play again button hint
+  if (celebrationTimer > 120) {
+    ctx.fillStyle = '#FFF';
+    ctx.font = '18px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('Press SPACE or click to play again', GAME_WIDTH / 2, GAME_HEIGHT - 15);
+    ctx.textAlign = 'left';
+  }
+}
+
+// Add click/space handler for celebration
+document.addEventListener('click', () => {
+  if (inCelebration && celebrationTimer > 120) {
+    backToSelect();
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && inCelebration && celebrationTimer > 120) {
+    backToSelect();
+  }
+});
+
+function renderHUD() {
+  // Health
   ctx.fillStyle = 'rgba(0,0,0,0.7)';
   ctx.fillRect(10, 10, 180, 50);
   ctx.strokeStyle = '#FFD700';
@@ -970,7 +1417,7 @@ function render() {
     ctx.fill();
   }
   
-  // HUD - Timer (prominent!)
+  // Timer
   ctx.fillStyle = 'rgba(0,0,0,0.7)';
   ctx.fillRect(GAME_WIDTH / 2 - 60, 10, 120, 40);
   ctx.strokeStyle = timeRemaining <= 30 ? '#FF4444' : '#FFD700';
@@ -983,7 +1430,7 @@ function render() {
   ctx.fillText('⏱️ ' + formatTime(timeRemaining), GAME_WIDTH / 2, 38);
   ctx.textAlign = 'left';
   
-  // HUD - Score & Progress
+  // Score & Progress
   ctx.fillStyle = 'rgba(0,0,0,0.7)';
   ctx.fillRect(GAME_WIDTH - 160, 10, 150, 55);
   ctx.strokeStyle = '#FFD700';
@@ -993,7 +1440,6 @@ function render() {
   ctx.font = 'bold 18px Arial';
   ctx.fillText('Score: ' + score, GAME_WIDTH - 150, 32);
   
-  // Progress bar
   ctx.fillStyle = '#FFF';
   ctx.font = '12px Arial';
   ctx.fillText('Progress:', GAME_WIDTH - 150, 48);
@@ -1002,65 +1448,6 @@ function render() {
   ctx.fillRect(GAME_WIDTH - 90, 40, 70, 12);
   ctx.fillStyle = '#32CD32';
   ctx.fillRect(GAME_WIDTH - 90, 40, 70 * progress, 12);
-  
-  // Victory fireworks
-  if (gameState === 'victory') {
-    if (Math.random() < 0.15) {
-      fireworks.push({
-        x: Math.random() * GAME_WIDTH, y: GAME_HEIGHT,
-        vy: -8 - Math.random() * 5,
-        color: ['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF'][Math.floor(Math.random() * 6)],
-        exploded: false, particles: []
-      });
-    }
-    
-    fireworks = fireworks.filter(fw => {
-      if (!fw.exploded) {
-        fw.y += fw.vy;
-        ctx.fillStyle = fw.color;
-        ctx.beginPath();
-        ctx.arc(fw.x, fw.y, 6, 0, Math.PI * 2);
-        ctx.fill();
-        if (fw.vy > -2) {
-          fw.exploded = true;
-          for (let i = 0; i < 30; i++) {
-            fw.particles.push({ x: fw.x, y: fw.y, vx: (Math.random() - 0.5) * 12, vy: (Math.random() - 0.5) * 12, life: 60 });
-          }
-        }
-      } else {
-        fw.particles = fw.particles.filter(p => {
-          p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--;
-          ctx.fillStyle = fw.color;
-          ctx.globalAlpha = p.life / 60;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.globalAlpha = 1;
-          return p.life > 0;
-        });
-        return fw.particles.length > 0;
-      }
-      return true;
-    });
-    
-    // Victory text
-    ctx.fillStyle = '#FFD700';
-    ctx.font = 'bold 48px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('YOU WIN!', GAME_WIDTH / 2, GAME_HEIGHT / 2 - 20);
-    ctx.font = 'bold 20px Arial';
-    ctx.fillText('Click "Play Again" to continue', GAME_WIDTH / 2, GAME_HEIGHT / 2 + 20);
-    ctx.textAlign = 'left';
-    
-    // Show victory screen after a delay
-    setTimeout(() => {
-      if (gameState === 'victory') {
-        document.getElementById('gameCanvas').classList.add('hidden');
-        document.getElementById('instructions').classList.add('hidden');
-        document.getElementById('victoryScreen').classList.remove('hidden');
-      }
-    }, 3000);
-  }
 }
 
 // Start loading
