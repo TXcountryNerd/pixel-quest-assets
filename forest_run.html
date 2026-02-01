@@ -719,6 +719,16 @@ function update() {
   enemies.forEach(enemy => {
     if (!enemy.alive) return;
     
+    // Check if enemy is falling
+    if (enemy.falling) {
+      enemy.vy = (enemy.vy || 0) + GRAVITY;
+      enemy.y += enemy.vy;
+      if (enemy.y > GAME_HEIGHT + 50) {
+        enemy.alive = false;
+      }
+      return; // Skip other logic while falling
+    }
+    
     if (enemy.onPlatform) {
       enemy.x += enemy.direction * 1.2;
       if (enemy.x < enemy.platformX || enemy.x > enemy.platformX + enemy.platformWidth - 40) {
@@ -727,7 +737,18 @@ function update() {
     } else {
       enemy.x += enemy.direction * 1.5;
       if (Math.abs(enemy.x - enemy.startX) > 80) enemy.direction *= -1;
+      
+      // Check if goomba walked over a pit
+      for (const pit of pits) {
+        if (enemy.x + 25 > pit.x && enemy.x + 25 < pit.x + pit.width) {
+          enemy.falling = true;
+          enemy.vy = 0;
+          break;
+        }
+      }
     }
+    
+    if (enemy.falling) return; // Don't check collision while falling
     
     const enemyWidth = 50, enemyHeight = 50;
     if (player.x + PLAYER_WIDTH > enemy.x && player.x < enemy.x + enemyWidth) {
@@ -747,6 +768,8 @@ function update() {
   // Cloud witches
   clouds.forEach(cloud => {
     if (!cloud.witch.alive) return;
+    
+    // Witch attacks
     if (cloud.witch.attackCooldown <= 0) {
       const dist = player.x - cloud.x;
       if (Math.abs(dist) < 400 && Math.abs(dist) > 50) {
@@ -755,6 +778,28 @@ function update() {
       }
     }
     if (cloud.witch.attackCooldown > 0) cloud.witch.attackCooldown--;
+    
+    // Player can stomp witches!
+    const witchX = cloud.x + 25;
+    const witchY = cloud.y - 50;
+    const witchWidth = 45;
+    const witchHeight = 55;
+    
+    if (player.x + PLAYER_WIDTH > witchX && player.x < witchX + witchWidth) {
+      // Stomp from above
+      if (player.vy > 0 && player.y + currentHeight > witchY && player.y + currentHeight < witchY + 25) {
+        cloud.witch.alive = false;
+        player.vy = JUMP_FORCE * 0.7;
+        score += 200; // Witches worth more points
+      } 
+      // Hit from side (damage player)
+      else if (player.invincible <= 0 && player.y + currentHeight > witchY && player.y < witchY + witchHeight) {
+        health--;
+        if (health <= 0) { endGame('Hit by a Witch!'); return; }
+        player.invincible = 90;
+        player.vx = player.facing * -8;
+      }
+    }
   });
   
   // Projectiles
